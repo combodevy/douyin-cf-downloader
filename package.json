@@ -1,0 +1,18 @@
+{
+  "name": "douyin-cf-downloader",
+  "version": "1.0.0",
+  "description": "Douyin video downloader deployed on Cloudflare Workers",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --format=esm --platform=browser --outfile=dist/worker.js --external:cloudflare:* --minify",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240909.0",
+    "esbuild": "^0.23.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^3.78.0"
+  }
+}

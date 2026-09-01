@@ -1,0 +1,11 @@
+name = "douyin-downloader"
+main = "dist/worker.js"
+compatibility_date = "2024-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./public"
+
+[vars]
+DOUYIN_BASE_URL = "https://www.douyin.com"
+RATE_LIMIT_PER_MINUTE = "30"
