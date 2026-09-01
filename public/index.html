@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>抖音下载器 - Cloudflare 版</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: #f5f6f8;
+    color: #1a1a2e;
+    min-height: 100vh;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+  header { text-align: center; padding: 32px 0 24px; }
+  header h1 {
+    font-size: 28px; font-weight: 700;
+    background: linear-gradient(135deg, #fe2c55, #25f4ee);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  header p { color: #666; margin-top: 8px; font-size: 14px; }
+  .tabs {
+    display: flex; gap: 4px; background: #fff; border-radius: 12px;
+    padding: 4px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .tab {
+    flex: 1; padding: 10px 16px; border: none; background: transparent;
+    border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500;
+    color: #666; transition: all 0.2s;
+  }
+  .tab.active { background: #fe2c55; color: #fff; }
+  .tab:hover:not(.active) { background: #f0f0f0; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .card {
+    background: #fff; border-radius: 12px; padding: 24px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 16px;
+  }
+  .input-group { display: flex; gap: 10px; margin-bottom: 12px; }
+  .input-group input {
+    flex: 1; padding: 12px 16px; border: 1px solid #e0e0e0;
+    border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s;
+  }
+  .input-group input:focus { border-color: #fe2c55; }
+  .btn {
+    padding: 12px 24px; border: none; border-radius: 8px; font-size: 14px;
+    font-weight: 600; cursor: pointer; transition: all 0.2s; white-space: nowrap;
+  }
+  .btn-primary { background: #fe2c55; color: #fff; }
+  .btn-primary:hover { background: #e0254a; }
+  .btn-primary:disabled { background: #ccc; cursor: not-allowed; }
+  .btn-secondary { background: #f0f0f0; color: #333; }
+  .btn-secondary:hover { background: #e0e0e0; }
+  .options {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    font-size: 13px; color: #666;
+  }
+  .options select {
+    padding: 6px 10px; border: 1px solid #e0e0e0; border-radius: 6px;
+    font-size: 13px; outline: none;
+  }
+  .loading { display: none; text-align: center; padding: 40px; color: #999; }
+  .loading.active { display: block; }
+  .spinner {
+    display: inline-block; width: 32px; height: 32px;
+    border: 3px solid #f0f0f0; border-top-color: #fe2c55;
+    border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 12px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .error {
+    display: none; background: #fff0f0; border: 1px solid #ffcccc;
+    color: #cc0000; padding: 12px 16px; border-radius: 8px;
+    font-size: 14px; margin-bottom: 16px;
+  }
+  .error.active { display: block; }
+  .result-header { display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+  .result-cover {
+    width: 160px; height: 220px; object-fit: cover; border-radius: 8px; background: #f0f0f0;
+  }
+  .result-meta { flex: 1; min-width: 200px; }
+  .result-title { font-size: 18px; font-weight: 600; margin-bottom: 8px; line-height: 1.4; }
+  .result-info { font-size: 13px; color: #888; line-height: 1.8; }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 600; margin-left: 6px;
+  }
+  .badge-video { background: #e8f4fd; color: #1890ff; }
+  .badge-gallery { background: #f0f9eb; color: #67c23a; }
+  .badge-paid { background: #fff7e6; color: #fa8c16; }
+  .badge-watermark { background: #fff1f0; color: #f5222d; }
+  .badge-nowm { background: #f6ffed; color: #52c41a; }
+  .asset-list { display: flex; flex-direction: column; gap: 8px; }
+  .asset-item {
+    display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+    background: #fafafa; border-radius: 8px; flex-wrap: wrap;
+  }
+  .asset-type {
+    font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 4px;
+    min-width: 56px; text-align: center;
+  }
+  .asset-type.video { background: #e8f4fd; color: #1890ff; }
+  .asset-type.image { background: #f0f9eb; color: #67c23a; }
+  .asset-type.audio { background: #fff7e6; color: #fa8c16; }
+  .asset-type.cover { background: #f9f0ff; color: #722ed1; }
+  .asset-type.avatar { background: #e6fffb; color: #13c2c2; }
+  .asset-filename { flex: 1; font-size: 13px; color: #333; word-break: break-all; min-width: 150px; }
+  .asset-meta { font-size: 12px; color: #999; white-space: nowrap; }
+  .video-player { width: 100%; max-height: 480px; border-radius: 8px; background: #000; margin-bottom: 16px; }
+  .gallery-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px; margin-bottom: 16px;
+  }
+  .gallery-grid img {
+    width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: 6px;
+    cursor: pointer; transition: transform 0.2s;
+  }
+  .gallery-grid img:hover { transform: scale(1.03); }
+  .list-item {
+    display: flex; gap: 12px; padding: 12px; border-bottom: 1px solid #f0f0f0;
+    cursor: pointer; transition: background 0.15s;
+  }
+  .list-item:hover { background: #fafafa; }
+  .list-item:last-child { border-bottom: none; }
+  .list-thumb {
+    width: 80px; height: 106px; object-fit: cover; border-radius: 6px;
+    background: #f0f0f0; flex-shrink: 0;
+  }
+  .list-info { flex: 1; min-width: 0; }
+  .list-title {
+    font-size: 14px; font-weight: 500; margin-bottom: 4px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .list-meta { font-size: 12px; color: #999; }
+  .load-more {
+    width: 100%; padding: 12px; margin-top: 12px; border: 1px solid #e0e0e0;
+    background: #fff; border-radius: 8px; cursor: pointer; font-size: 14px; color: #666;
+  }
+  .load-more:hover { background: #f5f5f5; }
+  .hot-list { display: flex; flex-direction: column; gap: 2px; }
+  .hot-item {
+    display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+    border-radius: 6px; cursor: pointer;
+  }
+  .hot-item:hover { background: #fafafa; }
+  .hot-rank { width: 24px; text-align: center; font-weight: 700; font-size: 15px; color: #999; }
+  .hot-rank.top1 { color: #fe2c55; }
+  .hot-rank.top2 { color: #ff7a45; }
+  .hot-rank.top3 { color: #faad14; }
+  .hot-word { flex: 1; font-size: 14px; }
+  .hot-value { font-size: 12px; color: #999; }
+  .lightbox {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+    z-index: 1000; justify-content: center; align-items: center; padding: 20px;
+  }
+  .lightbox.active { display: flex; }
+  .lightbox img { max-width: 100%; max-height: 90vh; border-radius: 8px; }
+  footer { text-align: center; padding: 24px; color: #aaa; font-size: 12px; }
+  footer a { color: #fe2c55; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>抖音下载器</h1>
+    <p>基于 Cloudflare Workers · 无水印视频 / 图文 / 音乐下载</p>
+  </header>
+  <div class="tabs">
+    <button class="tab active" data-tab="parse">链接解析</button>
+    <button class="tab" data-tab="user">用户主页</button>
+    <button class="tab" data-tab="search">搜索</button>
+    <button class="tab" data-tab="hot">热搜榜</button>
+  </div>
+  <div class="panel active" id="panel-parse">
+    <div class="card">
+      <div class="input-group">
+        <input type="text" id="parse-url" placeholder="粘贴抖音视频/图文链接（支持 v.douyin.com 短链）">
+        <button class="btn btn-primary" id="parse-btn">解析</button>
+      </div>
+      <div class="options">
+        <label>画质：
+          <select id="parse-quality">
+            <option value="highest">最高画质</option>
+            <option value="1080p">1080p</option>
+            <option value="720p">720p</option>
+            <option value="540p">540p</option>
+            <option value="480p">480p</option>
+            <option value="lowest">最低画质（省流量）</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div class="error" id="parse-error"></div>
+    <div class="loading" id="parse-loading"><div class="spinner"></div>正在解析，请稍候...</div>
+    <div id="parse-result"></div>
+  </div>
+  <div class="panel" id="panel-user">
+    <div class="card">
+      <div class="input-group">
+        <input type="text" id="user-url" placeholder="粘贴抖音用户主页链接或 sec_uid">
+        <button class="btn btn-primary" id="user-btn">获取作品</button>
+      </div>
+    </div>
+    <div class="error" id="user-error"></div>
+    <div class="loading" id="user-loading"><div class="spinner"></div>正在获取作品列表...</div>
+    <div class="card" id="user-result" style="display:none;">
+      <div id="user-list"></div>
+      <button class="load-more" id="user-more" style="display:none;">加载更多</button>
+    </div>
+  </div>
+  <div class="panel" id="panel-search">
+    <div class="card">
+      <div class="input-group">
+        <input type="text" id="search-q" placeholder="输入搜索关键词">
+        <button class="btn btn-primary" id="search-btn">搜索</button>
+      </div>
+      <div class="options">
+        <label>排序：
+          <select id="search-sort">
+            <option value="0">综合</option>
+            <option value="1">最多点赞</option>
+            <option value="2">最新发布</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div class="error" id="search-error"></div>
+    <div class="loading" id="search-loading"><div class="spinner"></div>正在搜索...</div>
+    <div class="card" id="search-result" style="display:none;">
+      <div id="search-list"></div>
+      <button class="load-more" id="search-more" style="display:none;">加载更多</button>
+    </div>
+  </div>
+  <div class="panel" id="panel-hot">
+    <div class="card">
+      <button class="btn btn-secondary" id="hot-refresh" style="margin-bottom:12px;">刷新热搜</button>
+      <div class="loading" id="hot-loading"><div class="spinner"></div>正在获取热搜...</div>
+      <div class="hot-list" id="hot-list"></div>
+    </div>
+  </div>
+</div>
+<div class="lightbox" id="lightbox"><img id="lightbox-img" src="" alt=""></div>
+<footer>
+  基于 <a href="https://github.com/jiji262/douyin-downloader" target="_blank">douyin-downloader</a> 算法转译 ·
+  部署于 Cloudflare Workers · 仅供学习交流使用
+</footer>
+<script>
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+    if (tab.dataset.tab === 'hot' && !document.getElementById('hot-list').children.length) loadHot();
+  });
+});
+function showError(id, msg) { const el = document.getElementById(id); el.textContent = msg; el.classList.add('active'); }
+function hideError(id) { document.getElementById(id).classList.remove('active'); }
+function showLoading(id) { document.getElementById(id).classList.add('active'); }
+function hideLoading(id) { document.getElementById(id).classList.remove('active'); }
+function formatDate(ts) { if (!ts) return ''; return new Date(ts * 1000).toLocaleDateString('zh-CN'); }
+function escapeHtml(str) { const div = document.createElement('div'); div.textContent = str; return div.innerHTML; }
+function typeLabel(type) { const map = { video:'视频', image:'图片', audio:'音乐', cover:'封面', avatar:'头像', json:'数据' }; return map[type] || type; }
+function openLightbox(src) { document.getElementById('lightbox-img').src = src; document.getElementById('lightbox').classList.add('active'); }
+document.getElementById('lightbox').addEventListener('click', () => document.getElementById('lightbox').classList.remove('active'));
+let currentParseResult = null;
+document.getElementById('parse-btn').addEventListener('click', doParse);
+document.getElementById('parse-url').addEventListener('keydown', e => { if (e.key === 'Enter') doParse(); });
+async function doParse() {
+  const url = document.getElementById('parse-url').value.trim();
+  if (!url) { showError('parse-error', '请输入抖音链接'); return; }
+  hideError('parse-error');
+  document.getElementById('parse-result').innerHTML = '';
+  showLoading('parse-loading');
+  document.getElementById('parse-btn').disabled = true;
+  try {
+    const quality = document.getElementById('parse-quality').value;
+    const resp = await fetch(`/api/parse?url=${encodeURIComponent(url)}&quality=${quality}`);
+    const data = await resp.json();
+    if (!data.success) { showError('parse-error', data.error || '解析失败'); return; }
+    currentParseResult = data;
+    renderParseResult(data);
+  } catch (err) { showError('parse-error', '请求失败: ' + err.message); }
+  finally { hideLoading('parse-loading'); document.getElementById('parse-btn').disabled = false; }
+}
+function renderParseResult(data) {
+  const container = document.getElementById('parse-result');
+  const mediaBadge = data.media_type === 'gallery' ? '<span class="badge badge-gallery">图文</span>' : '<span class="badge badge-video">视频</span>';
+  const paidBadge = data.is_paid ? '<span class="badge badge-paid">付费内容</span>' : '';
+  let html = '<div class="card">';
+  html += '<div class="result-header">';
+  if (data.cover_url) html += `<img class="result-cover" src="${data.cover_url}" alt="封面" onerror="this.style.display='none'">`;
+  html += '<div class="result-meta">';
+  html += `<div class="result-title">${escapeHtml(data.title)} ${mediaBadge} ${paidBadge}</div>`;
+  html += '<div class="result-info">';
+  html += `作者：${escapeHtml(data.author)}<br>`;
+  if (data.create_time) html += `发布时间：${formatDate(data.create_time)}<br>`;
+  html += `作品 ID：${data.aweme_id}<br>`;
+  html += `画质：${data.quality || 'highest'}`;
+  html += '</div></div></div>';
+  const mainVideo = data.assets.find(a => a.type === 'video' && !a.filename.includes('mirror'));
+  if (mainVideo) html += `<video class="video-player" controls playsinline src="${mainVideo.proxy_url}" poster="${data.cover_url || ''}"></video>`;
+  if (data.media_type === 'gallery') {
+    const images = data.assets.filter(a => a.type === 'image');
+    if (images.length) {
+      html += '<div class="gallery-grid">';
+      images.forEach((img, i) => { html += `<img src="${img.proxy_url}" alt="图${i+1}" loading="lazy" onclick="openLightbox('${img.proxy_url}')">`; });
+      html += '</div>';
+    }
+  }
+  html += '<div class="asset-list">';
+  data.assets.forEach(asset => {
+    const wmBadge = asset.watermark ? '<span class="badge badge-watermark">水印</span>' : '<span class="badge badge-nowm">无水印</span>';
+    const meta = [];
+    if (asset.width && asset.height) meta.push(`${asset.width}x${asset.height}`);
+    if (asset.quality) meta.push(asset.quality);
+    html += '<div class="asset-item">';
+    html += `<span class="asset-type ${asset.type}">${typeLabel(asset.type)}</span>`;
+    html += `<span class="asset-filename">${escapeHtml(asset.filename)}</span>`;
+    html += `<span class="asset-meta">${meta.join(' · ')} ${wmBadge}</span>`;
+    html += `<a class="btn btn-primary" href="${asset.proxy_url}" download="${escapeHtml(asset.filename)}" style="padding:8px 16px;font-size:13px;">下载</a>`;
+    html += '</div>';
+  });
+  html += '</div></div>';
+  container.innerHTML = html;
+}
+let userCursor = 0, userSecUid = '', userHasMore = true;
+document.getElementById('user-btn').addEventListener('click', doUser);
+document.getElementById('user-url').addEventListener('keydown', e => { if (e.key === 'Enter') doUser(); });
+document.getElementById('user-more').addEventListener('click', loadMoreUser);
+async function doUser() {
+  const input = document.getElementById('user-url').value.trim();
+  if (!input) { showError('user-error', '请输入用户主页链接或 sec_uid'); return; }
+  let secUid = input;
+  const match = input.match(/\/user\/([A-Za-z0-9_-]+)/);
+  if (match) secUid = match[1];
+  userSecUid = secUid; userCursor = 0; userHasMore = true;
+  document.getElementById('user-list').innerHTML = '';
+  document.getElementById('user-result').style.display = 'none';
+  document.getElementById('user-more').style.display = 'none';
+  await loadMoreUser();
+}
+async function loadMoreUser() {
+  if (!userHasMore || !userSecUid) return;
+  hideError('user-error'); showLoading('user-loading');
+  try {
+    const resp = await fetch(`/api/user?sec_uid=${encodeURIComponent(userSecUid)}&cursor=${userCursor}&count=20`);
+    const data = await resp.json();
+    if (!data.success) { showError('user-error', data.error || '获取失败'); return; }
+    userHasMore = data.has_more; userCursor = data.max_cursor;
+    renderList('user-list', data.items);
+    document.getElementById('user-result').style.display = 'block';
+    document.getElementById('user-more').style.display = userHasMore ? 'block' : 'none';
+  } catch (err) { showError('user-error', '请求失败: ' + err.message); }
+  finally { hideLoading('user-loading'); }
+}
+function renderList(listId, items) {
+  const list = document.getElementById(listId);
+  items.forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'list-item';
+    div.innerHTML = `<img class="list-thumb" src="${item.cover || ''}" onerror="this.style.background='#f0f0f0'">
+      <div class="list-info"><div class="list-title">${escapeHtml(item.desc || '无标题')}</div>
+      <div class="list-meta">${item.author || ''} · ${formatDate(item.create_time)} · ${item.media_type === 'gallery' ? '图文' : '视频'}</div></div>`;
+    div.addEventListener('click', () => {
+      document.getElementById('parse-url').value = `https://www.douyin.com/video/${item.aweme_id}`;
+      document.querySelector('.tab[data-tab="parse"]').click();
+      doParse();
+    });
+    list.appendChild(div);
+  });
+}
+let searchOffset = 0, searchKeyword = '', searchHasMore = true;
+document.getElementById('search-btn').addEventListener('click', doSearch);
+document.getElementById('search-q').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+document.getElementById('search-more').addEventListener('click', loadMoreSearch);
+async function doSearch() {
+  const q = document.getElementById('search-q').value.trim();
+  if (!q) { showError('search-error', '请输入搜索关键词'); return; }
+  searchKeyword = q; searchOffset = 0; searchHasMore = true;
+  document.getElementById('search-list').innerHTML = '';
+  document.getElementById('search-result').style.display = 'none';
+  document.getElementById('search-more').style.display = 'none';
+  await loadMoreSearch();
+}
+async function loadMoreSearch() {
+  if (!searchHasMore || !searchKeyword) return;
+  hideError('search-error'); showLoading('search-loading');
+  try {
+    const sort = document.getElementById('search-sort').value;
+    const resp = await fetch(`/api/search?q=${encodeURIComponent(searchKeyword)}&offset=${searchOffset}&count=10&sort=${sort}`);
+    const data = await resp.json();
+    if (!data.success) { showError('search-error', data.error || '搜索失败'); return; }
+    searchHasMore = data.has_more; searchOffset = data.max_cursor;
+    renderList('search-list', data.items);
+    document.getElementById('search-result').style.display = 'block';
+    document.getElementById('search-more').style.display = searchHasMore ? 'block' : 'none';
+  } catch (err) { showError('search-error', '请求失败: ' + err.message); }
+  finally { hideLoading('search-loading'); }
+}
+document.getElementById('hot-refresh').addEventListener('click', loadHot);
+async function loadHot() {
+  showLoading('hot-loading');
+  document.getElementById('hot-list').innerHTML = '';
+  try {
+    const resp = await fetch('/api/hot');
+    const data = await resp.json();
+    if (!data.success) return;
+    const list = document.getElementById('hot-list');
+    data.items.forEach(item => {
+      const rankClass = item.rank <= 3 ? `top${item.rank}` : '';
+      const div = document.createElement('div');
+      div.className = 'hot-item';
+      div.innerHTML = `<span class="hot-rank ${rankClass}">${item.rank}</span><span class="hot-word">${escapeHtml(item.word || '')}</span><span class="hot-value">${item.hot_value || ''}</span>`;
+      div.addEventListener('click', () => {
+        document.getElementById('search-q').value = item.word;
+        document.querySelector('.tab[data-tab="search"]').click();
+        doSearch();
+      });
+      list.appendChild(div);
+    });
+  } catch (err) { console.error('热搜获取失败', err); }
+  finally { hideLoading('hot-loading'); }
+}
+</script>
+</body>
+</html>
