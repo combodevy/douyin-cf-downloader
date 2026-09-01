@@ -9,6 +9,7 @@ export type UrlType =
   | "live_replay"
   | "short"
   | "lvdetail";
+
 export interface ParsedUrl {
   originalUrl: string;
   type: UrlType;
@@ -23,6 +24,7 @@ export interface ParsedUrl {
   episode_id?: string;
   replay_id?: string;
 }
+
 export interface VideoDetail {
   aweme_id: string;
   desc: string;
@@ -37,6 +39,8 @@ export interface VideoDetail {
   video?: {
     play_addr?: { url_list: string[]; uri: string };
     play_addr_h264?: { url_list: string[] };
+    play_addr_265?: { url_list: string[] };
+    play_addr_256?: { url_list: string[] };
     bit_rate?: Array<{
       bit_rate: number;
       play_addr: { url_list: string[]; uri: string; width?: number; height?: number; data_size?: number };
@@ -44,6 +48,8 @@ export interface VideoDetail {
     vid?: string;
     download_addr?: { url_list: string[]; uri: string };
     cover?: { url_list: string[] };
+    is_charge_video?: boolean;
+    is_need_set_cookie?: boolean;
   };
   images?: Array<{
     url_list?: string[];
@@ -67,6 +73,7 @@ export interface VideoDetail {
   };
   [key: string]: unknown;
 }
+
 export interface PagedResponse {
   items: VideoDetail[];
   has_more: boolean;
@@ -74,6 +81,7 @@ export interface PagedResponse {
   status_code: number;
   raw: Record<string, unknown>;
 }
+
 export interface DownloadAsset {
   type: "video" | "image" | "audio" | "cover" | "avatar" | "json";
   url: string;
@@ -83,6 +91,7 @@ export interface DownloadAsset {
   quality?: string;
   watermark: boolean;
 }
+
 export interface ParseResult {
   success: boolean;
   aweme_id?: string;

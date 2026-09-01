@@ -1,163 +1,137 @@
 /**
- * X-Bogus 签名算法（转译自 Python utils/xbogus.py）
- *
- * 算法流程：
- * 1. 对 query+body+UA 做 MD5，取特定字节
- * 2. 构建 48 字节数据帧（时间戳、MD5 字节、options、aid）
- * 3. 按 sort_index 重排 + 链式异或校验
- * 4. RC4 加密
- * 5. 自定义 Base64 编码输出
+ * X-Bogus 签名算法（转译自 Python utils/xbogus.py — Evil0ctal 经典版本）
+ * 抖音上一代签名，作为 a_bogus 失败时的回退
  */
-import { md5, md5StrToArray } from "./md5";
+import { md5 } from "./md5";
 import { rc4Encrypt } from "./rc4";
 
 const CHARACTER =
-  "Dkdpgh2ZmsQB80/MfvV36XI1R45-WUAlEixNLwoqYTOPuzKFjJnry79HbGcaStCe";
-const SORT_INDEX = [
-  22, 4, 7, 25, 1, 32, 30, 24, 33, 16, 0, 11, 29, 19, 27, 35, 28, 34, 31, 10,
-  15, 18, 3, 8, 5, 17, 2, 13, 12, 26, 9, 20, 21, 6, 23, 36,
-];
-const SORT_INDEX_2 = [
-  22, 4, 7, 25, 1, 32, 30, 24, 33, 16, 0, 11, 29, 19, 27, 35, 28, 34, 31, 10,
-  15, 18, 3, 8, 5, 17, 2, 13, 12, 26, 9, 20, 21, 6, 23, 36, 37,
-];
-const XB_KEY = new Uint8Array([0x00, 0x01, 0x0c]);
+  "Dkdpgh4ZKsQB80/Mfvw36XI1R25-WUAlEi7NLboqYTOPuzmFjJnryx9HVGcaStCe=";
+
+const HEX_MAP: number[] = new Array(256).fill(0);
+"0123456789".split("").forEach((c, i) => { HEX_MAP[c.charCodeAt(0)] = i; });
+"abcdef".split("").forEach((c, i) => { HEX_MAP[c.charCodeAt(0)] = 10 + i; });
+"ABCDEF".split("").forEach((c, i) => { HEX_MAP[c.charCodeAt(0)] = 10 + i; });
+
+function md5StrToArray(md5Str: string): number[] {
+  if (md5Str.length > 32) {
+    return Array.from(md5Str).map((c) => c.charCodeAt(0));
+  }
+  const arr: number[] = [];
+  for (let i = 0; i < md5Str.length; i += 2) {
+    const hi = HEX_MAP[md5Str.charCodeAt(i)];
+    const lo = HEX_MAP[md5Str.charCodeAt(i + 1)];
+    arr.push((hi << 4) | lo);
+  }
+  return arr;
+}
+
+function md5Encrypt(urlPath: string): number[] {
+  const firstHex = md5(urlPath);
+  const firstBytes = md5StrToArray(firstHex);
+  const secondHex = md5(new Uint8Array(firstBytes));
+  return md5StrToArray(secondHex);
+}
+
+function encodingConversion(
+  a: number, b: number, c: number, e: number, d: number,
+  t: number, f: number, r: number, n: number, o: number,
+  i: number, underscore: number, x: number, u: number, s: number,
+  l: number, v: number, h: number, p: number
+): string {
+  const payload = [a, i, b, underscore, c, x, e, u, d, s, t, l, f, v, r, h, n, p, o];
+  return String.fromCharCode(...payload);
+}
+
+function calculation(a1: number, a2: number, a3: number): string {
+  const x3 = ((a1 & 255) << 16) | ((a2 & 255) << 8) | (a3 & 255);
+  return (
+    CHARACTER[(x3 & 0xfc0000) >> 18] +
+    CHARACTER[(x3 & 0x03f000) >> 12] +
+    CHARACTER[(x3 & 0x000fc0) >> 6] +
+    CHARACTER[x3 & 0x3f]
+  );
+}
 
 export interface XBogusResult {
-  params: string;
+  signedUrl: string;
   xbogus: string;
   userAgent: string;
 }
 
 export class XBogus {
-  private aid = 6383;
-  private options: number[];
   private userAgent: string;
+  private uaKey = new Uint8Array([0x00, 0x01, 0x0c]);
 
-  constructor(
-    userAgent: string = "",
-    options: number[] = [0, 1, 12]
-  ) {
-    this.options = options;
+  constructor(userAgent: string = "") {
     this.userAgent =
       userAgent ||
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0";
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
   }
 
-  private xbEncode(xbBytesStr: string): string {
-    const xbogus: string[] = [];
-    for (let i = 0; i < xbBytesStr.length; i += 3) {
-      let n: number;
-      if (i + 2 < xbBytesStr.length) {
-        n =
-          (xbBytesStr.charCodeAt(i) << 16) |
-          (xbBytesStr.charCodeAt(i + 1) << 8) |
-          xbBytesStr.charCodeAt(i + 2);
-      } else if (i + 1 < xbBytesStr.length) {
-        n =
-          (xbBytesStr.charCodeAt(i) << 16) |
-          (xbBytesStr.charCodeAt(i + 1) << 8);
-      } else {
-        n = xbBytesStr.charCodeAt(i) << 16;
-      }
-      const shifts = [18, 12, 6, 0];
-      const masks = [0xfc0000, 0x03f000, 0x0fc0, 0x3f];
-      for (let j = 0; j < 4; j++) {
-        if (shifts[j] === 6 && i + 1 >= xbBytesStr.length) break;
-        if (shifts[j] === 0 && i + 2 >= xbBytesStr.length) break;
-        xbogus.push(CHARACTER[(n & masks[j]) >> shifts[j]]);
+  build(url: string): XBogusResult {
+    const uaRc4 = rc4Encrypt(this.uaKey, this.userAgent);
+    const uaB64 = btoa(Array.from(uaRc4).map((b) => String.fromCharCode(b)).join(""));
+    const uaMd5Array = md5StrToArray(md5(uaB64));
+
+    const emptyBytes = md5StrToArray("d41d8cd98f00b204e9800998ecf8427e");
+    const emptyMd5Array = md5StrToArray(md5(new Uint8Array(emptyBytes)));
+
+    const urlMd5Array = md5Encrypt(url);
+
+    const timer = Math.floor(Date.now() / 1000);
+    const ct = 536919696;
+    const newArray: number[] = [
+      64, 0.00390625, 1, 12,
+      urlMd5Array[14], urlMd5Array[15],
+      emptyMd5Array[14], emptyMd5Array[15],
+      uaMd5Array[14], uaMd5Array[15],
+      (timer >> 24) & 255, (timer >> 16) & 255, (timer >> 8) & 255, timer & 255,
+      (ct >> 24) & 255, (ct >> 16) & 255, (ct >> 8) & 255, ct & 255,
+    ];
+
+    let xorResult = newArray[0];
+    for (let i = 1; i < newArray.length; i++) {
+      const v = Number.isInteger(newArray[i]) ? newArray[i] : Math.floor(newArray[i]);
+      xorResult ^= v;
+    }
+    newArray.push(xorResult);
+
+    const array3: number[] = [];
+    const array4: number[] = [];
+    for (let idx = 0; idx < newArray.length; idx += 2) {
+      array3.push(newArray[idx]);
+      if (idx + 1 < newArray.length) {
+        array4.push(newArray[idx + 1]);
       }
     }
-    const padCount = (4 - (xbogus.length % 4)) % 4;
-    xbogus.push("=".repeat(padCount));
-    return xbogus.join("");
-  }
+    const merged = [...array3, ...array4];
 
-  generate(params: string, body: string = ""): XBogusResult {
-    const xbDir = new Map<number, number>();
-    xbDir.set(14, 2);
-    xbDir.set(15, 255);
-    xbDir.set(36, 0);
-    xbDir.set(37, 0);
-
-    const startEncryption = Date.now();
-
-    const array1 = md5StrToArray(md5(params));
-    const array2 = md5StrToArray(md5(body));
-
-    const uaRc4 = rc4Encrypt(XB_KEY, this.userAgent);
-    const uaB64 = btoa(
-      Array.from(uaRc4).map((b) => String.fromCharCode(b)).join("")
+    const encoded = encodingConversion(
+      merged[0], merged[1], merged[2], merged[3], merged[4],
+      merged[5], merged[6], merged[7], merged[8], merged[9],
+      merged[10], merged[11], merged[12], merged[13], merged[14],
+      merged[15], merged[16], merged[17], merged[18]
     );
-    const array3 = md5StrToArray(md5(uaB64));
+    const rc4Key = new Uint8Array([0xff]);
+    const rc4Result = rc4Encrypt(rc4Key, encoded);
+    const garbled =
+      String.fromCharCode(2) +
+      String.fromCharCode(255) +
+      Array.from(rc4Result).map((b) => String.fromCharCode(b)).join("");
 
-    const endEncryption = Date.now();
-
-    xbDir.set(16, (startEncryption >> 24) & 255);
-    xbDir.set(17, (startEncryption >> 16) & 255);
-    xbDir.set(18, (startEncryption >> 8) & 255);
-    xbDir.set(19, startEncryption & 255);
-    xbDir.set(20, Math.floor(startEncryption / 256 / 256 / 256 / 256) & 255);
-    xbDir.set(21, Math.floor(startEncryption / 256 / 256 / 256 / 256 / 256) & 255);
-
-    xbDir.set(22, (this.options[0] >> 24) & 255);
-    xbDir.set(23, (this.options[0] >> 16) & 255);
-    xbDir.set(24, (this.options[0] >> 8) & 255);
-    xbDir.set(25, this.options[0] & 255);
-    xbDir.set(26, Math.floor(this.options[1] / 256) & 255);
-    xbDir.set(27, (this.options[1] % 256) & 255);
-    xbDir.set(28, (this.options[1] >> 24) & 255);
-    xbDir.set(29, (this.options[1] >> 16) & 255);
-    xbDir.set(30, (this.options[2] >> 24) & 255);
-    xbDir.set(31, (this.options[2] >> 16) & 255);
-    xbDir.set(32, (this.options[2] >> 8) & 255);
-    xbDir.set(33, this.options[2] & 255);
-
-    xbDir.set(34, array1[14]);
-    xbDir.set(35, array1[15]);
-    xbDir.set(36, array2[14]);
-    xbDir.set(37, array2[15]);
-    xbDir.set(38, array3[14]);
-    xbDir.set(39, array3[15]);
-
-    xbDir.set(40, (endEncryption >> 24) & 255);
-    xbDir.set(41, (endEncryption >> 16) & 255);
-    xbDir.set(42, (endEncryption >> 8) & 255);
-    xbDir.set(43, endEncryption & 255);
-    xbDir.set(44, xbDir.get(14) || 0);
-    xbDir.set(45, Math.floor(endEncryption / 256 / 256 / 256 / 256) & 255);
-    xbDir.set(46, Math.floor(endEncryption / 256 / 256 / 256 / 256 / 256) & 255);
-
-    xbDir.set(47, (this.aid >> 24) & 255);
-    xbDir.set(48, (this.aid >> 16) & 255);
-    xbDir.set(49, (this.aid >> 8) & 255);
-    xbDir.set(50, this.aid & 255);
-
-    const sortedValues: number[] = [];
-    for (const idx of SORT_INDEX) {
-      sortedValues.push(xbDir.get(idx) || 0);
+    let xb = "";
+    for (let idx = 0; idx < garbled.length; idx += 3) {
+      xb += calculation(
+        garbled.charCodeAt(idx),
+        garbled.charCodeAt(idx + 1),
+        garbled.charCodeAt(idx + 2)
+      );
     }
-
-    let xbXor = 0;
-    for (let i = 0; i < SORT_INDEX_2.length - 1; i++) {
-      if (i === 0) {
-        xbXor = xbDir.get(SORT_INDEX_2[i]) || 0;
-      }
-      xbXor ^= xbDir.get(SORT_INDEX_2[i + 1]) || 0;
-    }
-
-    const allValues = [...sortedValues, xbXor];
-    const allBytes = new Uint8Array(allValues);
-    const encrypted = rc4Encrypt(XB_KEY, allBytes);
-    const encryptedStr = Array.from(encrypted)
-      .map((b) => String.fromCharCode(b))
-      .join("");
-    const xbogus = this.xbEncode(encryptedStr);
-    const signedParams = `${params}&X-Bogus=${xbogus}`;
 
     return {
-      params: signedParams,
-      xbogus,
+      signedUrl: `${url}&X-Bogus=${xb}`,
+      xbogus: xb,
       userAgent: this.userAgent,
     };
   }

@@ -12,12 +12,14 @@
 import { sm3ToArray } from "./sm3";
 import { rc4Encrypt } from "./rc4";
 
+// ─── 自定义 Base64 字符表 ───────────────────────────────────────
 const CHARACTER =
   "Dkdpgh2ZmsQB80/MfvV36XI1R45-WUAlEixNLwoqYTOPuzKFjJnry79HbGcaStCe";
 const CHARACTER2 =
   "ckdp1h4ZKsUB80/Mfvw36XIgR25+WQAlEi7NLboqYTOPuzmFjJnryx9HVGDaStCe";
 const CHARACTER_LIST = [CHARACTER, CHARACTER2];
 
+// ─── transform_bytes 使用的 256 元素大数组 ──────────────────────
 const BIG_ARRAY: number[] = [
   121, 243, 55, 234, 103, 36, 47, 228, 30, 231, 106, 6, 115, 95, 78, 101,
   250, 207, 198, 50, 139, 227, 220, 105, 97, 143, 34, 28, 194, 215, 18, 100,
@@ -37,12 +39,12 @@ const BIG_ARRAY: number[] = [
   35, 7, 142, 131, 239, 203, 149, 136, 61, 249, 14, 156,
 ];
 
+// ─── 排序索引 ──────────────────────────────────────────────────
 const SORT_INDEX = [
   18, 20, 52, 26, 30, 34, 58, 38, 40, 53, 42, 21, 27, 54, 55, 31, 35, 57, 39,
   41, 43, 22, 28, 32, 60, 36, 23, 29, 33, 37, 44, 45, 59, 46, 47, 48, 49, 50,
   24, 25, 65, 66, 70, 71,
 ];
-
 const SORT_INDEX_2 = [
   18, 20, 26, 30, 34, 38, 40, 42, 21, 27, 31, 35, 39, 41, 43, 22, 28, 32, 36,
   23, 29, 33, 37, 44, 45, 46, 47, 48, 49, 50, 24, 25, 52, 53, 54, 55, 57, 58,
@@ -52,6 +54,7 @@ const SORT_INDEX_2 = [
 const SALT = "cus";
 const UA_KEY = new Uint8Array([0x00, 0x01, 0x0e]);
 
+// ─── 工具函数 ──────────────────────────────────────────────────
 function jsShiftRight(val: number, n: number): number {
   return (val % 0x100000000) >>> n;
 }
@@ -70,11 +73,21 @@ function generateRandomBytes(length: number = 3): string {
   return result;
 }
 
+/** 对应 Python params_to_array：SM3 加盐哈希 → 字节数组 */
 function paramsToArray(param: string, addSalt: boolean = true): number[] {
   const processed = addSalt ? param + SALT : param;
   return sm3ToArray(processed);
 }
 
+/**
+ * 对应 Python 第二次 params_to_array（输入为 list 时 process_param 不加盐）。
+ * 直接对字节数组做 SM3，不添加盐值。
+ */
+function sm3Bytes(bytes: number[]): number[] {
+  return sm3ToArray(new Uint8Array(bytes));
+}
+
+/** 对应 Python transform_bytes：256 元素大数组流加密 */
 function transformBytes(bytesList: number[]): string {
   const arr = [...BIG_ARRAY];
   let result = "";
@@ -106,6 +119,7 @@ function transformBytes(bytesList: number[]): string {
   return result;
 }
 
+/** 对应 Python abogus_encode：自定义 Base64 编码（3字节→4字符） */
 function abogusEncode(abogusBytesStr: string, alphabetIndex: number): string {
   const alphabet = CHARACTER_LIST[alphabetIndex];
   const abogus: string[] = [];
@@ -136,6 +150,7 @@ function abogusEncode(abogusBytesStr: string, alphabetIndex: number): string {
   return abogus.join("");
 }
 
+/** 对应 Python base64_encode（用于 UA 的 RC4 结果） */
 function base64Encode(inputString: string, alphabetIndex: number = 0): string {
   const alphabet = CHARACTER_LIST[alphabetIndex];
   let binary = "";
@@ -153,6 +168,7 @@ function base64Encode(inputString: string, alphabetIndex: number = 0): string {
   return output;
 }
 
+// ─── 浏览器指纹生成器 ──────────────────────────────────────────
 export function generateBrowserFingerprint(platform: string = "Win32"): string {
   const innerWidth = Math.floor(Math.random() * (1920 - 1024 + 1)) + 1024;
   const innerHeight = Math.floor(Math.random() * (1080 - 768 + 1)) + 768;
@@ -171,6 +187,7 @@ export function generateBrowserFingerprint(platform: string = "Win32"): string {
   );
 }
 
+// ─── a_bogus 主类 ──────────────────────────────────────────────
 export interface ABogusResult {
   params: string;
   abogus: string;
@@ -208,9 +225,11 @@ export class ABogus {
 
     const startEncryption = Date.now();
 
-    const array1 = paramsToArray(paramsToArray(params).map((b) => String.fromCharCode(b)).join(""));
-    const array2 = paramsToArray(paramsToArray(body).map((b) => String.fromCharCode(b)).join(""));
+    // 三路哈希（双重 SM3：第一次加盐，第二次输入为字节数组不加盐）
+    const array1 = sm3Bytes(paramsToArray(params));
+    const array2 = sm3Bytes(paramsToArray(body));
 
+    // UA: RC4 加密 → Base64 → SM3（不加盐）
     const uaRc4 = rc4Encrypt(UA_KEY, this.userAgent);
     const uaB64 = base64Encode(
       Array.from(uaRc4).map((b) => String.fromCharCode(b)).join(""),
@@ -220,13 +239,15 @@ export class ABogus {
 
     const endEncryption = Date.now();
 
+    // 时间戳
     abDir.set(20, (startEncryption >> 24) & 255);
     abDir.set(21, (startEncryption >> 16) & 255);
     abDir.set(22, (startEncryption >> 8) & 255);
     abDir.set(23, startEncryption & 255);
-    abDir.set(24, Math.floor(startEncryption / 256 / 256 / 256 / 256) & 255);
-    abDir.set(25, Math.floor(startEncryption / 256 / 256 / 256 / 256 / 256) & 255);
+    abDir.set(24, Math.floor(startEncryption / 256 / 256 / 256 / 256));
+    abDir.set(25, Math.floor(startEncryption / 256 / 256 / 256 / 256 / 256));
 
+    // options
     abDir.set(26, (this.options[0] >> 24) & 255);
     abDir.set(27, (this.options[0] >> 16) & 255);
     abDir.set(28, (this.options[0] >> 8) & 255);
@@ -240,6 +261,7 @@ export class ABogus {
     abDir.set(36, (this.options[2] >> 8) & 255);
     abDir.set(37, this.options[2] & 255);
 
+    // 哈希值
     abDir.set(38, array1[21]);
     abDir.set(39, array1[22]);
     abDir.set(40, array2[21]);
@@ -247,14 +269,16 @@ export class ABogus {
     abDir.set(42, array3[23]);
     abDir.set(43, array3[24]);
 
+    // 结束时间
     abDir.set(44, (endEncryption >> 24) & 255);
     abDir.set(45, (endEncryption >> 16) & 255);
     abDir.set(46, (endEncryption >> 8) & 255);
     abDir.set(47, endEncryption & 255);
     abDir.set(48, abDir.get(8) || 0);
-    abDir.set(49, Math.floor(endEncryption / 256 / 256 / 256 / 256) & 255);
-    abDir.set(50, Math.floor(endEncryption / 256 / 256 / 256 / 256 / 256) & 255);
+    abDir.set(49, Math.floor(endEncryption / 256 / 256 / 256 / 256));
+    abDir.set(50, Math.floor(endEncryption / 256 / 256 / 256 / 256 / 256));
 
+    // pageId + aid
     abDir.set(51, (this.pageId >> 24) & 255);
     abDir.set(52, (this.pageId >> 16) & 255);
     abDir.set(53, (this.pageId >> 8) & 255);
@@ -266,19 +290,23 @@ export class ABogus {
     abDir.set(59, (this.aid >> 16) & 255);
     abDir.set(60, (this.aid >> 24) & 255);
 
+    // 浏览器指纹长度
     abDir.set(64, this.browserFp.length);
     abDir.set(65, this.browserFp.length);
 
+    // 按 sort_index 取值
     const sortedValues: number[] = [];
     for (const idx of SORT_INDEX) {
       sortedValues.push(abDir.get(idx) || 0);
     }
 
+    // 浏览器指纹 ASCII 数组
     const fpArray: number[] = [];
     for (let i = 0; i < this.browserFp.length; i++) {
       fpArray.push(this.browserFp.charCodeAt(i));
     }
 
+    // 链式异或
     let abXor = (this.browserFp.length & 255) >> 8;
     for (let i = 0; i < SORT_INDEX_2.length - 1; i++) {
       if (i === 0) {
