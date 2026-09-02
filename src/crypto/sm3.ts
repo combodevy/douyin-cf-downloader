@@ -87,6 +87,7 @@ function pad(msg: Uint8Array): Uint8Array {
   const out = new Uint8Array(total);
   out.set(msg, 0);
   out[len] = 0x80;
+  // 64-bit big-endian length
   const hi = Math.floor(bitLen / 0x100000000);
   const lo = bitLen >>> 0;
   out[total - 8] = (hi >>> 24) & 0xff;
@@ -109,6 +110,7 @@ export function sm3(input: Uint8Array | string): string {
   }
   return v.map((x) => x.toString(16).padStart(8, "0")).join("");
 }
+/** 对应 Python 的 sm3_to_array：返回 32 字节整数数组 */
 export function sm3ToArray(input: Uint8Array | string): number[] {
   const hex = sm3(input);
   const arr: number[] = [];

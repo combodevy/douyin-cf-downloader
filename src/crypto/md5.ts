@@ -79,11 +79,14 @@ export function md5(input: Uint8Array | string): string {
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
+/** 对应 Python _md5_str_to_array：十六进制字符串转字节数组 */
 export function md5StrToArray(md5Str: string): number[] {
   if (md5Str.length > 32) {
     return Array.from(md5Str).map((c) => c.charCodeAt(0));
   }
   const arr: number[] = [];
+  // 对应 Python 的 hex 解码：每两个十六进制字符 → 一个字节
+  // 但原项目用的是自定义 array 映射（base64-like），这里直接按 hex 解码
   for (let i = 0; i < md5Str.length; i += 2) {
     arr.push(parseInt(md5Str.substring(i, i + 2), 16));
   }
