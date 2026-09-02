@@ -25,16 +25,19 @@ export function parseUrlType(url: string): UrlType | null {
   const parsed = new URL(url);
   const host = parsed.hostname.toLowerCase();
   const path = parsed.pathname;
+  // 直播回放
   if (isDouyinWebHost(host) && /^\/vsdetail\/\d+\/?$/.test(path)) {
     return "live_replay";
   }
   if (host === "webcast.amemv.com" && /^\/douyin\/webcast\/reflow\/episode\/\d+\/?$/.test(path)) {
     return "live_replay";
   }
+  // 直播 reflow
   if (host === "webcast.amemv.com" && /^\/douyin\/webcast\/reflow\/\d+\/?$/.test(path)) {
     return "live";
   }
   if (!isDouyinWebHost(host)) return null;
+  // modal_id 优先
   const modalId = parsed.searchParams.get("modal_id");
   if (modalId && modalId.trim()) return "video";
   if (host === "live.douyin.com") {
