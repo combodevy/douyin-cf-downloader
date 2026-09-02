@@ -28,6 +28,7 @@ export function rc4Encrypt(key: Uint8Array | string, plaintext: Uint8Array | str
   }
   return out;
 }
+/** RC4 加密后转 ISO-8859-1 字符串（对应 Python bytes.decode("ISO-8859-1")） */
 export function rc4EncryptToString(
   key: Uint8Array | string,
   plaintext: Uint8Array | string

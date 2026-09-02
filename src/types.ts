@@ -9,7 +9,6 @@ export type UrlType =
   | "live_replay"
   | "short"
   | "lvdetail";
-
 export interface ParsedUrl {
   originalUrl: string;
   type: UrlType;
@@ -24,7 +23,6 @@ export interface ParsedUrl {
   episode_id?: string;
   replay_id?: string;
 }
-
 export interface VideoDetail {
   aweme_id: string;
   desc: string;
@@ -73,7 +71,6 @@ export interface VideoDetail {
   };
   [key: string]: unknown;
 }
-
 export interface PagedResponse {
   items: VideoDetail[];
   has_more: boolean;
@@ -81,7 +78,6 @@ export interface PagedResponse {
   status_code: number;
   raw: Record<string, unknown>;
 }
-
 export interface DownloadAsset {
   type: "video" | "image" | "audio" | "cover" | "avatar" | "json";
   url: string;
@@ -91,7 +87,6 @@ export interface DownloadAsset {
   quality?: string;
   watermark: boolean;
 }
-
 export interface ParseResult {
   success: boolean;
   aweme_id?: string;
