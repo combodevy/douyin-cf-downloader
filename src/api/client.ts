@@ -1,31 +1,34 @@
 /**
  * 抖音 API 客户端（转译自 Python core/api_client.py）
+ *
+ * 核心职责：
+ * 1. 构建签名请求（a_bogus 优先，X-Bogus 回退）
+ * 2. 管理 Cookie（ttwid, odin_tt, passport_csrf_token, msToken）
+ * 3. 封装所有 API 端点
+ * 4. 错误处理与重试
  */
 import { ABogus } from "../crypto/abogus";
 import { XBogus } from "../crypto/xbogus";
 import { ensureMsToken } from "../crypto/mstoken";
 import type { PagedResponse, VideoDetail } from "../types";
-
+const DOUYIN_BASE = "https://www.douyin.com";
 const API_BASE = "https://www.douyin.com/aweme/v1/web";
 const DEFAULT_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
 const DEFAULT_REFERER = "https://www.douyin.com/?recommend=1";
 const RISK_CONTROL_STATUSES = new Set([403, 412, 429]);
 const RETRY_DELAYS = [1, 2, 5];
-
 export interface ApiClientOptions {
   cookies?: string;
   userAgent?: string;
   msToken?: string;
 }
-
 export class DouyinApiClient {
   private cookies: Record<string, string> = {};
   private userAgent: string;
   private msToken: string;
   private abogus: ABogus;
   private xbogus: XBogus;
-
   constructor(options: ApiClientOptions = {}) {
     this.userAgent = options.userAgent || DEFAULT_UA;
     this.msToken = options.msToken || "";
@@ -35,7 +38,6 @@ export class DouyinApiClient {
       this.parseCookies(options.cookies);
     }
   }
-
   private parseCookies(cookieStr: string): void {
     for (const part of cookieStr.split(";")) {
       const [k, ...v] = part.trim().split("=");
@@ -44,37 +46,50 @@ export class DouyinApiClient {
       }
     }
   }
-
   private getCookieString(): string {
     return Object.entries(this.cookies)
       .map(([k, v]) => `${k}=${v}`)
       .join("; ");
   }
-
   async ensureTokens(): Promise<void> {
-    if (!this.cookies["ttwid"]) this.cookies["ttwid"] = this.genTtwid();
-    if (!this.cookies["odin_tt"]) this.cookies["odin_tt"] = this.genOdinTt();
-    if (!this.cookies["passport_csrf_token"]) this.cookies["passport_csrf_token"] = this.genCsrfToken();
-    if (!this.msToken) this.msToken = await ensureMsToken("", this.userAgent);
+    if (!this.cookies["ttwid"]) {
+      this.cookies["ttwid"] = this.genTtwid();
+    }
+    if (!this.cookies["odin_tt"]) {
+      this.cookies["odin_tt"] = this.genOdinTt();
+    }
+    if (!this.cookies["passport_csrf_token"]) {
+      this.cookies["passport_csrf_token"] = this.genCsrfToken();
+    }
+    if (!this.msToken) {
+      this.msToken = await ensureMsToken("", this.userAgent);
+    }
     this.cookies["msToken"] = this.msToken;
   }
-
   private genTtwid(): string {
+    // ttwid 格式：1%7C{base64url}%7C{timestamp}%7C{hex}
     const ts = Math.floor(Date.now() / 1000);
-    const rand = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
-    const payload = btoa(JSON.stringify({ id: Math.random().toString(36).slice(2, 10), createTime: ts }))
-      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const rand = Array.from({ length: 32 }, () =>
+      Math.floor(Math.random() * 16).toString(16)
+    ).join("");
+    const payload = btoa(
+      JSON.stringify({
+        id: Math.random().toString(36).slice(2, 10),
+        createTime: ts,
+      })
+    ).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     return `1%7C${payload}%7C${ts}%7C${rand}`;
   }
-
   private genOdinTt(): string {
-    return Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+    return Array.from({ length: 64 }, () =>
+      Math.floor(Math.random() * 16).toString(16)
+    ).join("");
   }
-
   private genCsrfToken(): string {
-    return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+    return Array.from({ length: 32 }, () =>
+      Math.floor(Math.random() * 16).toString(16)
+    ).join("");
   }
-
   private buildBaseParams(aid: number = 6383): Record<string, string> {
     return {
       aid: String(aid),
@@ -109,17 +124,14 @@ export class DouyinApiClient {
       uifid: "",
     };
   }
-
   private genWebId(): string {
     return String(Math.floor(Math.random() * 9000000000000000000) + 1000000000000000000);
   }
-
   private buildQueryString(params: Record<string, string>): string {
     return Object.entries(params)
       .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
       .join("&");
   }
-
   private buildHeaders(referer: string): Record<string, string> {
     return {
       "User-Agent": this.userAgent,
@@ -129,11 +141,19 @@ export class DouyinApiClient {
       Cookie: this.getCookieString(),
     };
   }
-
   private sleep(seconds: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
   }
-
+  /**
+   * 发起签名 GET 请求（带重试 + 双 aid 回退）
+   *
+   * 对照原项目 _request_json：
+   * - 双 aid 候选（6383 图文, 1128 视频）
+   * - 每 aid 最多重试 3 次，退避延迟 [1,2,5] 秒
+   * - 风控状态码（403/412/429）自动重试
+   * - 空 200 响应当反爬信号重试
+   * - a_bogus 签名，失败回退 X-Bogus
+   */
   async signedGet(
     endpoint: string,
     params: Record<string, string>,
@@ -144,30 +164,33 @@ export class DouyinApiClient {
     const ref = referer || DEFAULT_REFERER;
     const aidCandidates = aid === 6383 ? [6383, 1128] : [aid];
     let lastError: Error | null = null;
-
     for (const currentAid of aidCandidates) {
       const baseParams = this.buildBaseParams(currentAid);
       const allParams = { ...baseParams, ...params };
       const queryString = this.buildQueryString(allParams);
-
       for (let attempt = 0; attempt < 3; attempt++) {
         const abResult = this.abogus.generate(queryString);
         const url = `${API_BASE}${endpoint}?${abResult.params}`;
         const headers = this.buildHeaders(ref);
-
         let resp: Response;
         try {
           resp = await fetch(url, { headers, cf: { cacheTtl: 0 } });
         } catch (e) {
           lastError = e instanceof Error ? e : new Error(String(e));
-          if (attempt < 2) { await this.sleep(RETRY_DELAYS[attempt]); continue; }
+          if (attempt < 2) {
+            await this.sleep(RETRY_DELAYS[attempt]);
+            continue;
+          }
           break;
         }
-
+        // 风控状态码 → 回退 X-Bogus 再试
         if (RISK_CONTROL_STATUSES.has(resp.status)) {
           const xbResult = this.xbogus.build(`${API_BASE}${endpoint}?${queryString}`);
           try {
-            resp = await fetch(xbResult.signedUrl, { headers: this.buildHeaders(ref), cf: { cacheTtl: 0 } });
+            resp = await fetch(xbResult.signedUrl, {
+              headers: this.buildHeaders(ref),
+              cf: { cacheTtl: 0 },
+            });
           } catch (e) {
             lastError = e instanceof Error ? e : new Error(String(e));
           }
@@ -175,22 +198,30 @@ export class DouyinApiClient {
             await this.sleep(RETRY_DELAYS[attempt]);
             continue;
           }
-          if (!resp.ok) { lastError = new Error(`API ${resp.status}: ${resp.statusText}`); continue; }
+          if (!resp.ok) {
+            lastError = new Error(`API ${resp.status}: ${resp.statusText}`);
+            continue;
+          }
         }
-
         if (!resp.ok) {
           lastError = new Error(`API ${resp.status}: ${resp.statusText}`);
-          if (resp.status >= 500 && attempt < 2) { await this.sleep(RETRY_DELAYS[attempt]); continue; }
+          if (resp.status >= 500 && attempt < 2) {
+            await this.sleep(RETRY_DELAYS[attempt]);
+            continue;
+          }
           break;
         }
-
+        // 空 200 响应 = 反爬信号
         const text = await resp.text();
         if (!text || text.trim() === "") {
-          if (attempt < 2) { await this.sleep(RETRY_DELAYS[attempt]); continue; }
+          if (attempt < 2) {
+            await this.sleep(RETRY_DELAYS[attempt]);
+            continue;
+          }
           lastError = new Error("Empty response (anti-bot)");
           break;
         }
-
+        // 同步响应 Cookie
         const setCookie = resp.headers.get("set-cookie");
         if (setCookie) {
           for (const part of setCookie.split(",")) {
@@ -198,25 +229,29 @@ export class DouyinApiClient {
             if (m) this.cookies[m[1].trim()] = m[2].trim();
           }
         }
-
         try {
           return JSON.parse(text) as Record<string, unknown>;
         } catch {
           lastError = new Error("Invalid JSON response");
-          if (attempt < 2) { await this.sleep(RETRY_DELAYS[attempt]); continue; }
+          if (attempt < 2) {
+            await this.sleep(RETRY_DELAYS[attempt]);
+            continue;
+          }
           break;
         }
       }
     }
     throw lastError || new Error("All request attempts failed");
   }
-
+  /**
+   * 发起签名 POST 请求（form-encoded）
+   */
   async signedPost(
     endpoint: string,
     params: Record<string, string>,
     body: Record<string, string>,
     aid: number = 6383,
-    referer: string = ""
+    referer: string = DOUYIN_BASE
   ): Promise<Record<string, unknown>> {
     await this.ensureTokens();
     const baseParams = this.buildBaseParams(aid);
@@ -233,17 +268,34 @@ export class DouyinApiClient {
       "Content-Type": "application/x-www-form-urlencoded",
       Cookie: this.getCookieString(),
     };
-    const resp = await fetch(url, { method: "POST", headers, body: bodyString, cf: { cacheTtl: 0 } });
-    if (!resp.ok) throw new Error(`API POST failed: ${resp.status}`);
+    const resp = await fetch(url, {
+      method: "POST",
+      headers,
+      body: bodyString,
+      cf: { cacheTtl: 0 },
+    });
+    if (!resp.ok) {
+      throw new Error(`API POST failed: ${resp.status}`);
+    }
     return (await resp.json()) as Record<string, unknown>;
   }
-
+  // ─── 具体 API 端点 ────────────────────────────────────────────
+  /** 获取单作品详情 */
   async getVideoDetail(awemeId: string, aid: number = 6383): Promise<VideoDetail | null> {
-    const data = await this.signedGet("/aweme/detail/", { aweme_id: awemeId }, aid);
-    return (data["aweme_detail"] as VideoDetail) || null;
+    const data = await this.signedGet(
+      "/aweme/detail/",
+      { aweme_id: awemeId },
+      aid
+    );
+    const detail = data["aweme_detail"] as VideoDetail | undefined;
+    return detail || null;
   }
-
-  async getUserPosts(secUid: string, maxCursor: number = 0, count: number = 18): Promise<PagedResponse> {
+  /** 获取用户作品列表（post 模式） */
+  async getUserPosts(
+    secUid: string,
+    maxCursor: number = 0,
+    count: number = 18
+  ): Promise<PagedResponse> {
     const data = await this.signedGet("/aweme/post/", {
       sec_user_id: secUid,
       max_cursor: String(maxCursor),
@@ -258,8 +310,12 @@ export class DouyinApiClient {
     });
     return this.parsePagedResponse(data);
   }
-
-  async getUserFavorites(secUid: string, maxCursor: number = 0, count: number = 20): Promise<PagedResponse> {
+  /** 获取用户点赞列表 */
+  async getUserFavorites(
+    secUid: string,
+    maxCursor: number = 0,
+    count: number = 20
+  ): Promise<PagedResponse> {
     const data = await this.signedGet("/aweme/favorite/", {
       sec_user_id: secUid,
       max_cursor: String(maxCursor),
@@ -267,13 +323,17 @@ export class DouyinApiClient {
     });
     return this.parsePagedResponse(data);
   }
-
+  /** 获取合集详情 */
   async getMixDetail(mixId: string): Promise<Record<string, unknown> | null> {
     const data = await this.signedGet("/mix/detail/", { mix_id: mixId });
     return (data["mix_info"] as Record<string, unknown>) || null;
   }
-
-  async getMixAwemes(mixId: string, cursor: number = 0, count: number = 20): Promise<PagedResponse> {
+  /** 获取合集作品列表 */
+  async getMixAwemes(
+    mixId: string,
+    cursor: number = 0,
+    count: number = 20
+  ): Promise<PagedResponse> {
     const data = await this.signedGet("/mix/aweme/", {
       mix_id: mixId,
       cursor: String(cursor),
@@ -281,16 +341,20 @@ export class DouyinApiClient {
     });
     return this.parsePagedResponse(data);
   }
-
+  /** 获取音乐详情 */
   async getMusicDetail(musicId: string): Promise<Record<string, unknown> | null> {
     const data = await this.signedGet("/music/detail/", { music_id: musicId });
     return (data["music_info"] as Record<string, unknown>) || null;
   }
-
+  /** 获取热搜榜 */
   async getHotSearchBoard(): Promise<Record<string, unknown>> {
-    return this.signedGet("/hot/search/list/", { detail_list: "1", source: "6" });
+    const data = await this.signedGet("/hot/search/list/", {
+      detail_list: "1",
+      source: "6",
+    });
+    return data;
   }
-
+  /** 关键词搜索 */
   async searchAweme(
     keyword: string,
     offset: number = 0,
@@ -310,8 +374,11 @@ export class DouyinApiClient {
       query_correct_type: "1",
       is_filter_search: isFilterSearch,
     });
+    // 搜索结果结构特殊：data[].aweme_info
     const dataList = (data["data"] as Array<Record<string, unknown>>) || [];
-    const items = dataList.map((d) => d["aweme_info"] as VideoDetail).filter(Boolean);
+    const items = dataList
+      .map((d) => d["aweme_info"] as VideoDetail)
+      .filter(Boolean);
     return {
       items,
       has_more: Boolean(data["has_more"]),
@@ -320,7 +387,6 @@ export class DouyinApiClient {
       raw: data,
     };
   }
-
   private parsePagedResponse(data: Record<string, unknown>): PagedResponse {
     const items = ((data["aweme_list"] as VideoDetail[]) || []).filter(Boolean);
     return {
